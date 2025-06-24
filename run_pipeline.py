@@ -34,25 +34,24 @@ def main():
     p.add_argument('--no-wandb',  action='store_true')
     args = p.parse_args()
 
-    repo = Path.cwd()  # assume /content/TabDiff
+    repo = Path.cwd()  # expect /content/TabDiff
     data_root = Path('/content/data')
     project_data = repo / 'data' / args.dataname
 
-    # 0) Symlink data/ → ./data
+    # 0) Symlink /content/data → ./data in the repo
     if (repo / 'data').exists():
         shutil.rmtree(repo / 'data')
     os.symlink(data_root, repo / 'data')
 
-    # Copy info.json
-    src_info = data_root / 'Info' / f"{args.dataname}.json"
-    dst_info = project_data / 'info.json'
-    dst_info.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(src_info, dst_info)
+    # 0b) Symlink /content/synthetic → ./synthetic for TabMetrics
+    synth_src = Path('/content/synthetic')
+    synth_dst = repo / 'synthetic'
+    if synth_dst.exists() or synth_dst.is_symlink():
+        shutil.rmtree(synth_dst)
+    os.symlink(synth_src, synth_dst)
 
-    # Path to toml
+    # 1) Patch TOML for seed pretrain
     toml_path = repo / 'tabdiff' / 'configs' / 'tabdiff_configs.toml'
-
-    # 1) Patch for seed pretrain
     seed_overrides = {
         'train.main.steps':            args.pre_steps,
         'train.main.batch_size':       2048,
@@ -64,21 +63,21 @@ def main():
         'sample.batch_size':           10000,
     }
     patch_toml(toml_path, seed_overrides)
-    
-    # 2) Seed pretrain via CLI
+
+    # 2) Seed pretraining
     print(">>> Seed pre-training")
     cmd = [
-        sys_exe := 'python3', 'main.py',
+        'python3', 'main.py',
         '--dataname', args.dataname,
         '--mode', 'train',
         '--gpu', str(args.gpu),
         '--exp_name', args.exp_seed,
+        '--debug'
     ]
     if args.no_wandb: cmd.append('--no_wandb')
-    cmd.append('--debug')
     run_cmd(cmd, cwd=str(repo))
 
-    # 3) Patch for fine-tune
+    # 3) Patch TOML for fine-tuning
     ft_overrides = seed_overrides.copy()
     ft_overrides.update({
         'train.main.steps':            args.ft_steps,
@@ -88,37 +87,36 @@ def main():
     })
     patch_toml(toml_path, ft_overrides)
 
-    # 4) Fine-tune via CLI
+    # 4) Fine-tuning
     print(">>> Fine-tuning")
     cmd = [
-        sys_exe, 'main.py',
+        'python3', 'main.py',
         '--dataname', args.dataname,
         '--mode', 'train',
         '--gpu', str(args.gpu),
         '--exp_name', args.exp_ft,
         '--ckpt_path', args.ckpt_seed,
+        '--debug'
     ]
     if args.no_wandb: cmd.append('--no_wandb')
-    cmd.append('--debug')
     run_cmd(cmd, cwd=str(repo))
 
-    # 5) Sample + report
+    # 5) Sampling & reporting
     print(">>> Sampling & reporting")
     cmd = [
-        sys_exe, 'main.py',
+        'python3', 'main.py',
         '--dataname', args.dataname,
         '--mode', 'sample',
         '--gpu', str(args.gpu),
         '--exp_name', args.exp_ft,
         '--ckpt_path', f"ckpt_finetune/{args.exp_ft}.pth",
         '--num_samples_to_generate', str(args.sample_n),
-        '--report',
+        '--report'
     ]
     if args.no_wandb: cmd.append('--no_wandb')
     run_cmd(cmd, cwd=str(repo))
 
-    print("✅ Done! Check `ckpt_finetune/` for checkpoints and CSV.")
+    print("✅ Done! Check `ckpt_finetune/` and `synthetic/{args.dataname}` for outputs.")
 
 if __name__ == '__main__':
-    import sys
     main()
