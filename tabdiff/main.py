@@ -134,13 +134,26 @@ def main(args):
     # Model
     backbone = UniModMLP(**raw_config['unimodmlp_params'])
     model = Model(backbone, **raw_config['diffusion_params']['edm_params'])
+        # pull out diffusion params
+    dp = raw_config['diffusion_params']
     diffusion = UnifiedCtimeDiffusion(
-        num_classes=train_data.categories,
-        num_numerical_features=train_data.d_numerical,
-        denoise_fn=model,
-        **raw_config['diffusion_params'],
-        device=args.device,
+        # core args
+        num_classes               = categories,
+        num_numerical_features    = d_numerical,
+        denoise_fn                = model,
+        y_only_model              = y_only_model,
+        # diffusion hyper-parameters (in the exact order/signature the class defines)
+        num_timesteps             = dp['num_timesteps'],
+        scheduler                 = dp['scheduler'],
+        cat_scheduler             = dp['cat_scheduler'],
+        noise_dist                = dp['noise_dist'],
+        sampler_params            = dp['sampler_params'],
+        edm_params                = dp['edm_params'],
+        noise_dist_params         = dp['noise_dist_params'],
+        noise_schedule_params     = dp['noise_schedule_params'],
+        device                    = device,
     )
+
     diffusion.to(args.device)
     diffusion.train()
 
