@@ -4,52 +4,93 @@ import argparse
 from tabdiff.main import main as tabdiff_main
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Wrapper to invoke TabDiff’s own CLI entrypoint"
-    )
+    parser = argparse.ArgumentParser(description="Wrapper for TabDiff CLI")
 
-    # Dataset + mode
+    # ── General configs ──────────────────────────────────────────────────────
     parser.add_argument(
-        "--dataname", required=True,
-        help="Name of the dataset folder under data/"
+        "--dataname", type=str, required=True,
+        help="Dataset name; folder under data/"
     )
     parser.add_argument(
-        "--mode", choices=["train","sample"], required=True,
-        help="train or sample"
+        "--mode", type=str, choices=["train", "sample"], required=True,
+        help="Mode: train or sample"
+    )
+    parser.add_argument(
+        "--method", type=str, default="tabdiff",
+        help="Model to run; currently only 'tabdiff'"
+    )
+    parser.add_argument(
+        "--gpu", type=int, default=0,
+        help="GPU index (set to -1 for CPU)"
+    )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="Enable debug (verbose) logging"
+    )
+    parser.add_argument(
+        "--no_wandb", action="store_true",
+        help="Disable Weights & Biases logging"
+    )
+    parser.add_argument(
+        "--exp_name", type=str, default=None,
+        help="Experiment name (used for checkpoint & log dirs)"
+    )
+    parser.add_argument(
+        "--deterministic", action="store_true",
+        help="Fix random seeds for reproducibility"
     )
 
-    # Device + logging
-    parser.add_argument("--gpu",        type=int,   default=0,        help="GPU index (or -1 for CPU)")
-    parser.add_argument("--debug",      action="store_true",         help="Verbose debug mode")
-    parser.add_argument("--no_wandb",   action="store_true",         help="Disable Weights & Biases")
-    parser.add_argument("--exp_name",   type=str,   default=None,     help="Experiment name (checkpoints & logs)")
+    # ── Diffusion / training configs ─────────────────────────────────────────
+    parser.add_argument(
+        "--y_only", action="store_true",
+        help="Train guidance model using only the target column"
+    )
+    parser.add_argument(
+        "--non_learnable_schedule", action="store_true",
+        help="Disable learnable noise schedule"
+    )
 
-    # Training-specific
-    parser.add_argument("--ckpt_path",  type=str,   default=None,     help="Checkpoint path (for finetune or sampling)")
-    
-    # Sampling-specific
+    # ── Sampling / evaluation configs ────────────────────────────────────────
     parser.add_argument(
         "--num_samples_to_generate", type=int, default=None,
-        help="When mode=sample: how many rows to generate"
+        help="When mode=sample: number of synthetic samples to generate"
+    )
+    parser.add_argument(
+        "--ckpt_path", type=str, default=None,
+        help="Path to the .pth checkpoint for sampling or finetuning"
     )
     parser.add_argument(
         "--report", action="store_true",
-        help="When sampling: run multiple trials and report mean±std"
+        help="In sample mode: run multiple trials and report mean±std"
     )
     parser.add_argument(
         "--num_runs", type=int, default=20,
-        help="Number of runs for --report"
+        help="Number of runs for --report mode"
     )
 
-    # (You can add any other flags that tabdiff.main expects—e.g. imputation flags, y_only, etc.)
+    # ── Imputation configs ──────────────────────────────────────────────────
+    parser.add_argument("--impute", action="store_true")
+    parser.add_argument("--trial_start", type=int, default=0)
+    parser.add_argument("--trial_size", type=int, default=50)
+    parser.add_argument("--resample_rounds", type=int, default=1)
+    parser.add_argument(
+        "--impute_condition", type=str, default="x_t",
+        help="Which conditioning variable to use for imputation"
+    )
+    parser.add_argument(
+        "--y_only_model_path", type=str, default=None,
+        help="Checkpoint path for unconditional guidance model"
+    )
+    parser.add_argument("--w_num", type=float, default=0.6)
+    parser.add_argument("--w_cat", type=float, default=0.6)
 
     args = parser.parse_args()
 
-    # Map GPU flag → device string
+    # ── Device setup ────────────────────────────────────────────────────────
     if args.gpu != -1 and torch.cuda.is_available():
         args.device = f"cuda:{args.gpu}"
     else:
         args.device = "cpu"
 
-    # Call the repo’s CLI entrypoint
+    # ── Delegate to the real entrypoint ─────────────────────────────────────
     tabdiff_main(args)
