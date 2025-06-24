@@ -119,6 +119,12 @@ def main(args):
         int_dequant_factor=raw_config['data']['int_dequant_factor'],
     )
 
+    # expose dataset dims for diffusion
+    d_numerical = train_data.d_numerical
+    categories = train_data.categories
+    # placeholder for y_only guidance model
+    y_only_model = None
+
     # Metrics paths
     real_csv = f'synthetic/{dataname}/real.csv'
     test_csv = f'synthetic/{dataname}/test.csv'
