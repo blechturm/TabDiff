@@ -18,7 +18,6 @@ def patch_toml(toml_path: Path, overrides: dict):
     toml_path.write_text(new_txt, encoding='utf-8')
 
 def make_args(**kwargs):
-    """Turn kwargs into a minimal Namespace for tabdiff_main."""
     return argparse.Namespace(**kwargs)
 
 def run():
@@ -38,74 +37,79 @@ def run():
     toml_path = repo / 'tabdiff' / 'configs' / 'tabdiff_configs.toml'
 
     # 1) Patch TOML for seed pretrain
-    seed_cfg_overrides = {
-        'train.main.steps':           args.pre_steps,
-        'train.main.batch_size':      2048,
-        'train.main.lr':              1e-3,
-        'train.main.check_val_every': args.pre_steps + 1,
+    seed_overrides = {
+        'train.main.steps':            args.pre_steps,
+        'train.main.batch_size':       2048,
+        'train.main.lr':               1e-3,
+        'train.main.check_val_every':  args.pre_steps + 1,
         'diffusion_params.num_timesteps': 50,
-        'model_save_path':            'ckpt_finetune',
-        'result_save_path':           'sample_results',
-        'sample.batch_size':          10000,
+        'model_save_path':             'ckpt_finetune',
+        'result_save_path':            'sample_results',
+        'sample.batch_size':           10000,
     }
-    patch_toml(toml_path, seed_cfg_overrides)
+    patch_toml(toml_path, seed_overrides)
 
-    # 2) Run seed pre-training
+    # 2) Seed pre-training
     print(">>> Seed pre-training")
     seed_args = make_args(
-        dataname=args.dataname,
-        mode='train',
-        method='tabdiff',
-        gpu=args.gpu,
-        debug=False,
-        no_wandb=args.no_wandb,
-        exp_name=args.exp_seed,
-        deterministic=False
+        dataname    = args.dataname,
+        mode        = 'train',
+        method      = 'tabdiff',
+        gpu         = args.gpu,
+        debug       = False,
+        no_wandb    = args.no_wandb,
+        exp_name    = args.exp_seed,
+        ckpt_path   = None,
+        deterministic = False
     )
+    seed_args.device = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'
     tabdiff_main(seed_args)
 
     # 3) Patch TOML for fine-tuning
-    ft_cfg_overrides = seed_cfg_overrides.copy()
-    ft_cfg_overrides.update({
-        'train.main.steps':           args.ft_steps,
-        'train.main.batch_size':      1024,
-        'train.main.lr':              5e-4,
-        'train.main.check_val_every': args.ft_steps + 1,
+    ft_overrides = seed_overrides.copy()
+    ft_overrides.update({
+        'train.main.steps':            args.ft_steps,
+        'train.main.batch_size':       1024,
+        'train.main.lr':               5e-4,
+        'train.main.check_val_every':  args.ft_steps + 1,
     })
-    patch_toml(toml_path, ft_cfg_overrides)
+    patch_toml(toml_path, ft_overrides)
 
-    # 4) Run fine-tuning
+    # 4) Fine-tuning
     print(">>> Fine-tuning")
     ft_args = make_args(
-        dataname=args.dataname,
-        mode='train',
-        method='tabdiff',
-        gpu=args.gpu,
-        debug=False,
-        no_wandb=args.no_wandb,
-        exp_name=args.exp_ft,
-        ckpt_path=args.ckpt_seed,
-        deterministic=False
+        dataname    = args.dataname,
+        mode        = 'train',
+        method      = 'tabdiff',
+        gpu         = args.gpu,
+        debug       = False,
+        no_wandb    = args.no_wandb,
+        exp_name    = args.exp_ft,
+        ckpt_path   = args.ckpt_seed,
+        deterministic = False
     )
+    ft_args.device = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'
     tabdiff_main(ft_args)
 
-    # 5) Run sampling + report
+    # 5) Sampling & reporting
     print(">>> Sampling & reporting")
     sample_args = make_args(
-        dataname=args.dataname,
-        mode='sample',
-        method='tabdiff',
-        gpu=args.gpu,
-        debug=False,
-        no_wandb=args.no_wandb,
-        exp_name=args.exp_ft,
-        ckpt_path=f"ckpt_finetune/{args.exp_ft}.pth",
-        num_samples_to_generate=args.sample_n,
-        report=True,
-        deterministic=False
+        dataname                 = args.dataname,
+        mode                     = 'sample',
+        method                   = 'tabdiff',
+        gpu                      = args.gpu,
+        debug                    = False,
+        no_wandb                 = args.no_wandb,
+        exp_name                 = args.exp_ft,
+        ckpt_path                = f"ckpt_finetune/{args.exp_ft}.pth",
+        num_samples_to_generate  = args.sample_n,
+        report                   = True,
+        deterministic            = False
     )
+    sample_args.device = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'
     tabdiff_main(sample_args)
-    print("✅ Done — see ckpt_finetune/ for your CSV & logs")
+
+    print("✅ Done! Check `ckpt_finetune/` for your checkpoints and generated CSV.")
 
 if __name__ == '__main__':
     run()
