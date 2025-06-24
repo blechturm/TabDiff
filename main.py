@@ -6,26 +6,25 @@ from omegaconf import OmegaConf
 from tabdiff.trainer import Trainer
 
 def main(args: argparse.Namespace):
-    # 1) Load the user-edited TOML
-    cfg_dir     = os.path.dirname(__file__)
-    config_path = os.path.join(cfg_dir, "configs", "tabdiff_configs.toml")
+    # 1) Load the user-edited TOML from tabdiff/configs/
+    repo_root   = os.path.dirname(__file__)
+    config_path = os.path.join(repo_root, "tabdiff", "configs", "tabdiff_configs.toml")
     raw_cfg     = OmegaConf.load(config_path)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # We removed any hard-coded overrides here so your TOML settings
-    # like `train.main.check_val_every = 9999` are respected.
+    # We no longer override `check_val_every` here—your TOML value is used.
     # ─────────────────────────────────────────────────────────────────────────
 
-    # 2) Merge in CLI overrides
+    # 2) Merge CLI args on top
     dotlist = [f"{k}={v}" for k, v in vars(args).items() if v is not None]
     cli_cfg = OmegaConf.from_dotlist(dotlist)
     config  = OmegaConf.merge(raw_cfg, cli_cfg)
 
-    # 3) Make sure the output directories exist
+    # 3) Make sure output dirs exist
     os.makedirs(config.model_save_path,  exist_ok=True)
     os.makedirs(config.result_save_path, exist_ok=True)
 
-    # 4) Dispatch to training or sampling
+    # 4) Dispatch
     trainer = Trainer(config, args)
     if args.mode == "train":
         trainer.run_loop()
@@ -45,17 +44,18 @@ if __name__ == "__main__":
     parser.add_argument("--dataname", type=str, required=True)
     parser.add_argument("--mode",      type=str, choices=["train","sample"], default="train")
 
-    # Device
+    # Device & logging
     parser.add_argument("--gpu",       type=int, default=0)
     parser.add_argument("--debug",     action="store_true")
     parser.add_argument("--no_wandb",  action="store_true")
     parser.add_argument("--exp_name",  type=str, default=None)
+    parser.add_argument("--deterministic", action="store_true")
 
-    # Training / model
+    # Diffusion / training
     parser.add_argument("--y_only",                action="store_true")
     parser.add_argument("--non_learnable_schedule",action="store_true")
 
-    # Sampling
+    # Sampling / evaluation
     parser.add_argument("--num_samples_to_generate", type=int, default=None)
     parser.add_argument("--ckpt_path",               type=str, default=None)
     parser.add_argument("--report",                  action="store_true")
