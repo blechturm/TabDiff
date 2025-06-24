@@ -178,7 +178,7 @@ def main(args):
         metrics,
         logger,
         lr=raw_config['train']['main']['lr'],
-        weight_decay=raw_config['train']['main']['weight_decay'],
+        weight_decay=raw_config['train']['main'].get('weight_decay', 0),
         steps=raw_config['train']['main']['steps'],
         batch_size=raw_config['train']['main']['batch_size'],
         check_val_every=raw_config['train']['main']['check_val_every'],
