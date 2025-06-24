@@ -28,35 +28,33 @@ def main():
     p.add_argument('--gpu',       type=int, default=0)
     p.add_argument('--exp-seed',  default='seed_pretrain')
     p.add_argument('--exp-ft',    default='real_finetune')
-    p.add_argument('--pre-steps', type=int, default=10)
-    p.add_argument('--ft-steps',  type=int, default=10)
     p.add_argument('--sample-n',  type=int, default=100000)
     p.add_argument('--no-wandb',  action='store_true')
     args = p.parse_args()
 
     repo = Path.cwd()  # expect /content/TabDiff
     data_root = Path('/content/data')
-    project_data = repo / 'data' / args.dataname
-
-    # 0) Symlink /content/data → ./data in the repo
+    
+    # 0) Symlink /content/data → ./data for TabDiff CLI
     if (repo / 'data').exists():
         shutil.rmtree(repo / 'data')
     os.symlink(data_root, repo / 'data')
-
-    # 0b) Symlink /content/synthetic → ./synthetic for TabMetrics
+    # 0b) Symlink /content/synthetic → ./synthetic for metrics
     synth_src = Path('/content/synthetic')
     synth_dst = repo / 'synthetic'
     if synth_dst.exists() or synth_dst.is_symlink():
         shutil.rmtree(synth_dst)
     os.symlink(synth_src, synth_dst)
 
-    # 1) Patch TOML for seed pretrain
+    # Path to the toml config
     toml_path = repo / 'tabdiff' / 'configs' / 'tabdiff_configs.toml'
+
+    # 1) Patch for seed pretrain (disable interim eval)
     seed_overrides = {
-        'train.main.steps':            args.pre_steps,
+        'train.main.steps':            10,
         'train.main.batch_size':       2048,
         'train.main.lr':               1e-3,
-        'train.main.check_val_every':  args.pre_steps + 1,
+        'train.main.check_val_every':  9999,
         'diffusion_params.num_timesteps': 50,
         'model_save_path':             'ckpt_finetune',
         'result_save_path':            'sample_results',
@@ -64,7 +62,7 @@ def main():
     }
     patch_toml(toml_path, seed_overrides)
 
-    # 2) Seed pretraining
+    # 2) Seed pre-training
     print(">>> Seed pre-training")
     cmd = [
         'python3', 'main.py',
@@ -74,16 +72,17 @@ def main():
         '--exp_name', args.exp_seed,
         '--debug'
     ]
-    if args.no_wandb: cmd.append('--no_wandb')
+    if args.no_wandb:
+        cmd.append('--no_wandb')
     run_cmd(cmd, cwd=str(repo))
 
-    # 3) Patch TOML for fine-tuning
+    # 3) Patch for fine-tuning (also disable interim eval)
     ft_overrides = seed_overrides.copy()
     ft_overrides.update({
-        'train.main.steps':            args.ft_steps,
+        'train.main.steps':            10,
         'train.main.batch_size':       1024,
         'train.main.lr':               5e-4,
-        'train.main.check_val_every':  args.ft_steps + 1,
+        'train.main.check_val_every':  9999,
     })
     patch_toml(toml_path, ft_overrides)
 
@@ -98,7 +97,8 @@ def main():
         '--ckpt_path', args.ckpt_seed,
         '--debug'
     ]
-    if args.no_wandb: cmd.append('--no_wandb')
+    if args.no_wandb:
+        cmd.append('--no_wandb')
     run_cmd(cmd, cwd=str(repo))
 
     # 5) Sampling & reporting
@@ -113,10 +113,11 @@ def main():
         '--num_samples_to_generate', str(args.sample_n),
         '--report'
     ]
-    if args.no_wandb: cmd.append('--no_wandb')
+    if args.no_wandb:
+        cmd.append('--no_wandb')
     run_cmd(cmd, cwd=str(repo))
 
-    print("✅ Done! Check `ckpt_finetune/` and `synthetic/{args.dataname}` for outputs.")
+    print("✅ Done! Check `ckpt_finetune/` for checkpoints and `synthetic/{args.dataname}` for metrics.")
 
 if __name__ == '__main__':
     main()
