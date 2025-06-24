@@ -23,52 +23,58 @@ def run_cmd(cmd, cwd=None):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--dataname',  required=True, help='folder under data/, e.g. contest_flat')
-    p.add_argument('--ckpt-seed', required=True, help='path to seed checkpoint .pth')
-    p.add_argument('--gpu',       type=int, default=0)
-    p.add_argument('--exp-seed',  default='seed_pretrain')
-    p.add_argument('--exp-ft',    default='real_finetune')
-    p.add_argument('--sample-n',  type=int, default=100000)
-    p.add_argument('--no-wandb',  action='store_true')
+    p.add_argument('--dataname',   required=True, help='folder under data/, e.g. contest_flat')
+    p.add_argument('--ckpt-seed',  required=True, help='path to seed checkpoint .pth')
+    p.add_argument('--gpu',        type=int, default=0)
+    p.add_argument('--exp-seed',   default='seed_pretrain')
+    p.add_argument('--exp-ft',     default='real_finetune')
+    p.add_argument('--pre-steps',  type=int, default=10,     help='number of epochs/iterations for seed pretrain')
+    p.add_argument('--ft-steps',   type=int, default=10,     help='number of epochs/iterations for fine-tuning')
+    p.add_argument('--sample-n',   type=int, default=100000, help='number of samples to generate')
+    p.add_argument('--no-wandb',   action='store_true')
     args = p.parse_args()
 
-    repo = Path.cwd()  # expect /content/TabDiff
-    data_root = Path('/content/data')
-    
-    # 0) Symlink /content/data → ./data for TabDiff CLI
+    repo       = Path.cwd()  # assume /content/TabDiff
+    data_root  = Path('/content/data')
+    toml_path  = repo / 'tabdiff' / 'configs' / 'tabdiff_configs.toml'
+    synth_src  = Path('/content/synthetic')
+    synth_dst  = repo / 'synthetic'
+
+    # 0) Symlink /content/data → ./data
     if (repo / 'data').exists():
         shutil.rmtree(repo / 'data')
     os.symlink(data_root, repo / 'data')
-    # 0b) Symlink /content/synthetic → ./synthetic for metrics
-    synth_src = Path('/content/synthetic')
-    synth_dst = repo / 'synthetic'
+
+    # 0b) Symlink /content/synthetic → ./synthetic
     if synth_dst.exists() or synth_dst.is_symlink():
         shutil.rmtree(synth_dst)
     os.symlink(synth_src, synth_dst)
 
-    # Path to the toml config
-    toml_path = repo / 'tabdiff' / 'configs' / 'tabdiff_configs.toml'
-
-    # 1) Patch for seed pretrain (disable interim eval)
-    seed_overrides = {
-        'train.main.steps':            10,
-        'train.main.batch_size':       2048,
-        'train.main.lr':               1e-3,
-        'train.main.check_val_every':  9999,
+    # Build common overrides base
+    base_overrides = {
         'diffusion_params.num_timesteps': 50,
-        'model_save_path':             'ckpt_finetune',
-        'result_save_path':            'sample_results',
-        'sample.batch_size':           10000,
+        'model_save_path':                'ckpt_finetune',
+        'result_save_path':               'sample_results',
+        'sample.batch_size':              10000,
     }
+
+    # 1) Seed pretrain TOML patch
+    seed_overrides = base_overrides.copy()
+    seed_overrides.update({
+        'train.main.steps':           args.pre_steps,
+        'train.main.batch_size':      2048,
+        'train.main.lr':              1e-3,
+        'train.main.check_val_every': args.pre_steps + 1,
+    })
     patch_toml(toml_path, seed_overrides)
 
-    # 2) Seed pre-training
-    print(">>> Seed pre-training")
+    # 2) Run seed pre-training
+    print(">>> Seed pre-training ({} steps)".format(args.pre_steps))
     cmd = [
         'python3', 'main.py',
         '--dataname', args.dataname,
-        '--mode', 'train',
-        '--gpu', str(args.gpu),
+        '--mode',     'train',
+        '--gpu',      str(args.gpu),
         '--exp_name', args.exp_seed,
         '--debug'
     ]
@@ -76,23 +82,23 @@ def main():
         cmd.append('--no_wandb')
     run_cmd(cmd, cwd=str(repo))
 
-    # 3) Patch for fine-tuning (also disable interim eval)
-    ft_overrides = seed_overrides.copy()
+    # 3) Fine-tune TOML patch
+    ft_overrides = base_overrides.copy()
     ft_overrides.update({
-        'train.main.steps':            10,
-        'train.main.batch_size':       1024,
-        'train.main.lr':               5e-4,
-        'train.main.check_val_every':  9999,
+        'train.main.steps':           args.ft_steps,
+        'train.main.batch_size':      1024,
+        'train.main.lr':              5e-4,
+        'train.main.check_val_every': args.ft_steps + 1,
     })
     patch_toml(toml_path, ft_overrides)
 
-    # 4) Fine-tuning
-    print(">>> Fine-tuning")
+    # 4) Run fine-tuning
+    print(">>> Fine-tuning ({} steps)".format(args.ft_steps))
     cmd = [
         'python3', 'main.py',
         '--dataname', args.dataname,
-        '--mode', 'train',
-        '--gpu', str(args.gpu),
+        '--mode',     'train',
+        '--gpu',      str(args.gpu),
         '--exp_name', args.exp_ft,
         '--ckpt_path', args.ckpt_seed,
         '--debug'
@@ -102,22 +108,22 @@ def main():
     run_cmd(cmd, cwd=str(repo))
 
     # 5) Sampling & reporting
-    print(">>> Sampling & reporting")
+    print(">>> Sampling & reporting ({} samples)".format(args.sample_n))
     cmd = [
         'python3', 'main.py',
-        '--dataname', args.dataname,
-        '--mode', 'sample',
-        '--gpu', str(args.gpu),
-        '--exp_name', args.exp_ft,
-        '--ckpt_path', f"ckpt_finetune/{args.exp_ft}.pth",
-        '--num_samples_to_generate', str(args.sample_n),
+        '--dataname',                 args.dataname,
+        '--mode',                     'sample',
+        '--gpu',                      str(args.gpu),
+        '--exp_name',                 args.exp_ft,
+        '--ckpt_path',                f"ckpt_finetune/{args.exp_ft}.pth",
+        '--num_samples_to_generate',  str(args.sample_n),
         '--report'
     ]
     if args.no_wandb:
         cmd.append('--no_wandb')
     run_cmd(cmd, cwd=str(repo))
 
-    print("✅ Done! Check `ckpt_finetune/` for checkpoints and `synthetic/{args.dataname}` for metrics.")
+    print("✅ Done! Check `ckpt_finetune/` and `sample_results/` for outputs.")
 
 if __name__ == '__main__':
     main()
