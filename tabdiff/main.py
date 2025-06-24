@@ -169,6 +169,15 @@ def main(args):
         mode='disabled' if args.debug or args.no_wandb else 'online'
     )
 
+    # Trainer: extract all training cfgs defensively
+    train_main_cfg = raw_config.get('train', {}).get('main', {})
+    lr = train_main_cfg.get('lr', 1e-3)
+    weight_decay = train_main_cfg.get('weight_decay', 0)
+    steps = train_main_cfg.get('steps', 100000)
+    batch_size = train_main_cfg.get('batch_size', 2048)
+    check_val_every = train_main_cfg.get('check_val_every', 1)
+    sample_batch_size = raw_config.get('sample', {}).get('batch_size', 10000)
+
     # Trainer
     trainer = Trainer(
         diffusion,
@@ -177,12 +186,12 @@ def main(args):
         val_data,
         metrics,
         logger,
-        lr=raw_config['train']['main']['lr'],
-        weight_decay=raw_config['train']['main'].get('weight_decay', 0),
-        steps=raw_config['train']['main']['steps'],
-        batch_size=raw_config['train']['main']['batch_size'],
-        check_val_every=raw_config['train']['main']['check_val_every'],
-        sample_batch_size=raw_config['sample']['batch_size'],
+        lr=lr,
+        weight_decay=weight_decay,
+        steps=steps,
+        batch_size=batch_size,
+        check_val_every=check_val_every,
+        sample_batch_size=sample_batch_size,
         num_samples_to_generate=num_samples_to_generate,
         model_save_path=model_save_path,
         result_save_path=result_save_path,
@@ -191,9 +200,9 @@ def main(args):
         y_only=args.y_only
     )
 
-    # Run
+    # Run loop or test based on mode
     if args.mode == 'train':
-        with open(os.path.join(model_save_path,'config.pkl'),'wb') as f:
+        with open(os.path.join(model_save_path, 'config.pkl'), 'wb') as f:
             pickle.dump(raw_config, f)
         trainer.run_loop()
     else:
@@ -201,7 +210,6 @@ def main(args):
             trainer.report_test(args.num_runs)
         else:
             trainer.test()
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Training or sampling with TabDiff')
