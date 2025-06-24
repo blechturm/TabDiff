@@ -32,6 +32,9 @@ def main(args):
     dataname = args.dataname
     data_dir = f'data/{dataname}'
     info_path = f'data/{dataname}/info.json'
+    # fallback to data/Info if needed
+    if not os.path.exists(info_path):
+        info_path = f'data/Info/{dataname}.json'
     with open(info_path, 'r') as f:
         info = json.load(f)
 
