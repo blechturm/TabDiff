@@ -2,93 +2,110 @@
 import os
 import argparse
 import tomli, tomli_w
-from tabdiff.trainer import Trainer
+from pathlib import Path
+from tabdiff.main import main as tabdiff_main
 
-def load_and_patch_toml(toml_path, overrides):
-    # Open in text mode so tomli.loads gets a str
-    with open(toml_path, 'r', encoding='utf-8') as f:
-        txt = f.read()
+def patch_toml(toml_path: Path, overrides: dict):
+    txt = toml_path.read_text(encoding='utf-8')
     cfg = tomli.loads(txt)
-    # apply dotted-key overrides
     for key, val in overrides.items():
         parts = key.split('.')
         cur = cfg
         for p in parts[:-1]:
             cur = cur.setdefault(p, {})
         cur[parts[-1]] = val
-    # write back
     new_txt = tomli_w.dumps(cfg)
-    with open(toml_path, 'w', encoding='utf-8') as f:
-        f.write(new_txt)
-    return cfg
+    toml_path.write_text(new_txt, encoding='utf-8')
 
-def main():
+def make_args(**kwargs):
+    """Turn kwargs into a minimal Namespace for tabdiff_main."""
+    return argparse.Namespace(**kwargs)
+
+def run():
     p = argparse.ArgumentParser()
-    p.add_argument('--data-root', default='data', help='where data/<name>/ lives')
-    p.add_argument('--dataname', required=True)
-    p.add_argument('--ckpt-seed', required=True, help='path to seed checkpoint .pth')
-    p.add_argument('--gpu', type=int, default=0)
-    p.add_argument('--exp', default='run1')
-    p.add_argument('--pre-steps', type=int, default=10)
-    p.add_argument('--ft-steps', type=int, default=10)
-    p.add_argument('--batch-seed', type=int, default=2048)
-    p.add_argument('--batch-ft', type=int, default=1024)
-    p.add_argument('--lr-seed', type=float, default=1e-3)
-    p.add_argument('--lr-ft', type=float, default=5e-4)
-    p.add_argument('--no-wandb', action='store_true')
+    p.add_argument('--dataname',   required=True, help='data/<dataname> folder')
+    p.add_argument('--ckpt-seed',  required=True, help='path to seed checkpoint .pth')
+    p.add_argument('--gpu',        type=int, default=0)
+    p.add_argument('--exp-seed',   default='seed_pretrain')
+    p.add_argument('--exp-ft',     default='real_finetune')
+    p.add_argument('--pre-steps',  type=int, default=10)
+    p.add_argument('--ft-steps',   type=int, default=10)
+    p.add_argument('--sample-n',   type=int, default=100000)
+    p.add_argument('--no-wandb',   action='store_true')
     args = p.parse_args()
 
-    # 1) Patch the TOML
-    toml_path = os.path.join(os.getcwd(), 'tabdiff', 'configs', 'tabdiff_configs.toml')
-    overrides = {
+    repo = Path.cwd()
+    toml_path = repo / 'tabdiff' / 'configs' / 'tabdiff_configs.toml'
+
+    # 1) Patch TOML for seed pretrain
+    seed_cfg_overrides = {
         'train.main.steps':           args.pre_steps,
-        'train.main.batch_size':      args.batch_seed,
-        'train.main.lr':              args.lr_seed,
+        'train.main.batch_size':      2048,
+        'train.main.lr':              1e-3,
         'train.main.check_val_every': args.pre_steps + 1,
         'diffusion_params.num_timesteps': 50,
         'model_save_path':            'ckpt_finetune',
         'result_save_path':           'sample_results',
         'sample.batch_size':          10000,
     }
-    cfg = load_and_patch_toml(toml_path, overrides)
+    patch_toml(toml_path, seed_cfg_overrides)
 
-    # 2) Prepare Trainer args container
-    class A: pass
-    A.dataname   = args.dataname
-    A.exp_name   = args.exp
-    A.device     = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'
-    A.gpu        = args.gpu
-    A.no_wandb   = args.no_wandb
-    A.debug      = False
-
-    # 3) Seed pre-train
+    # 2) Run seed pre-training
     print(">>> Seed pre-training")
-    trainer = Trainer(cfg, A)
-    trainer.run_loop()
+    seed_args = make_args(
+        dataname=args.dataname,
+        mode='train',
+        method='tabdiff',
+        gpu=args.gpu,
+        debug=False,
+        no_wandb=args.no_wandb,
+        exp_name=args.exp_seed,
+        deterministic=False
+    )
+    tabdiff_main(seed_args)
 
-    # 4) Fine-tune
-    print(">>> Fine-tuning")
-    # rewrite TOML for fine-tune
-    overrides.update({
+    # 3) Patch TOML for fine-tuning
+    ft_cfg_overrides = seed_cfg_overrides.copy()
+    ft_cfg_overrides.update({
         'train.main.steps':           args.ft_steps,
-        'train.main.batch_size':      args.batch_ft,
-        'train.main.lr':              args.lr_ft,
+        'train.main.batch_size':      1024,
+        'train.main.lr':              5e-4,
         'train.main.check_val_every': args.ft_steps + 1,
     })
-    cfg = load_and_patch_toml(toml_path, overrides)
-    A.ckpt_path = args.ckpt_seed
-    trainer = Trainer(cfg, A)
-    trainer.run_loop()
+    patch_toml(toml_path, ft_cfg_overrides)
 
-    # 5) Sample + report
-    print(">>> Sampling 100k")
-    A.ckpt_path = os.path.join('ckpt_finetune', f"{args.exp}.pth")
-    metrics, _, _ = trainer.sample_and_report(
-        ckpt_path=A.ckpt_path,
-        num_samples=100_000,
-        batch_size=cfg['sample']['batch_size']
+    # 4) Run fine-tuning
+    print(">>> Fine-tuning")
+    ft_args = make_args(
+        dataname=args.dataname,
+        mode='train',
+        method='tabdiff',
+        gpu=args.gpu,
+        debug=False,
+        no_wandb=args.no_wandb,
+        exp_name=args.exp_ft,
+        ckpt_path=args.ckpt_seed,
+        deterministic=False
     )
-    print("Metrics:", metrics)
+    tabdiff_main(ft_args)
+
+    # 5) Run sampling + report
+    print(">>> Sampling & reporting")
+    sample_args = make_args(
+        dataname=args.dataname,
+        mode='sample',
+        method='tabdiff',
+        gpu=args.gpu,
+        debug=False,
+        no_wandb=args.no_wandb,
+        exp_name=args.exp_ft,
+        ckpt_path=f"ckpt_finetune/{args.exp_ft}.pth",
+        num_samples_to_generate=args.sample_n,
+        report=True,
+        deterministic=False
+    )
+    tabdiff_main(sample_args)
+    print("✅ Done — see ckpt_finetune/ for your CSV & logs")
 
 if __name__ == '__main__':
-    main()
+    run()
