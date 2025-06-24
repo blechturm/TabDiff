@@ -40,7 +40,7 @@ def main():
     parser.add_argument("--no-wandb",  action="store_true", help="Disable Weights & Biases logging")
     args = parser.parse_args()
 
-    repo      = Path.cwd()
+    repo      = Path.cwd()  # run from repo root
     toml_path = repo / "tabdiff" / "configs" / "tabdiff_configs.toml"
 
     # 0) Symlink in data/ and synthetic/
@@ -58,15 +58,15 @@ def main():
         "sample.batch_size":              10000,
     }
 
-    # ── 1) PRETRAIN ─────────────────────────────────────────────────────────
-    seed = base.copy()
-    seed.update({
+    # ── 1) PRETRAIN on seed dataset ────────────────────────────────────────
+    seed_over = base.copy()
+    seed_over.update({
         "train.main.steps":           args.pre_steps,
         "train.main.batch_size":      2048,
         "train.main.lr":              1e-3,
         "train.main.check_val_every": args.pre_steps + 1,
     })
-    patch_toml(toml_path, seed)
+    patch_toml(toml_path, seed_over)
 
     print(f">>> Seed pre-training ({args.pre_steps} epochs)")
     cmd = [
@@ -81,15 +81,15 @@ def main():
         cmd.append("--no_wandb")
     run_cmd(cmd, cwd=str(repo))
 
-    # ── 2) FINETUNE ─────────────────────────────────────────────────────────
-    ft = base.copy()
-    ft.update({
+    # ── 2) FINETUNE on real dataset ───────────────────────────────────────
+    ft_over = base.copy()
+    ft_over.update({
         "train.main.steps":           args.ft_steps,
         "train.main.batch_size":      1024,
         "train.main.lr":              5e-4,
         "train.main.check_val_every": args.ft_steps + 1,
     })
-    patch_toml(toml_path, ft)
+    patch_toml(toml_path, ft_over)
 
     print(f">>> Fine-tuning ({args.ft_steps} epochs)")
     cmd = [
@@ -105,7 +105,7 @@ def main():
         cmd.append("--no_wandb")
     run_cmd(cmd, cwd=str(repo))
 
-    # ── 3) SAMPLE & REPORT ─────────────────────────────────────────────────
+    # ── 3) SAMPLE & REPORT ────────────────────────────────────────────────
     print(f">>> Sampling & reporting ({args.sample_n} samples)")
     cmd = [
         "python3", "run_tabdiff.py",
@@ -121,7 +121,7 @@ def main():
         cmd.append("--no_wandb")
     run_cmd(cmd, cwd=str(repo))
 
-    print("✅ Pipeline complete! Check ckpt_finetune/ & sample_results/")
+    print("✅ Pipeline complete! Check ckpt_finetune/ & sample_results/ for outputs.")
 
 if __name__ == "__main__":
     main()
