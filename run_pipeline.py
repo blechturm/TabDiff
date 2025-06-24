@@ -32,25 +32,25 @@ def main():
     parser.add_argument("--dataname",  required=True, help="Dataset folder under data/")
     parser.add_argument("--ckpt-seed", required=True, help="Path to seed checkpoint (.pth)")
     parser.add_argument("--gpu",       type=int, default=0, help="GPU index (or -1 for CPU)")
-    parser.add_argument("--exp-seed",  default="seed_pretrain", help="Name for seed pretraining experiment")
-    parser.add_argument("--exp-ft",    default="real_finetune", help="Name for fine-tuning experiment")
+    parser.add_argument("--exp-seed",  default="seed_pretrain", help="Name for seed experiment")
+    parser.add_argument("--exp-ft",    default="real_finetune", help="Name for fine-tune experiment")
     parser.add_argument("--pre-steps", type=int, default=10, help="Epochs for pretraining")
     parser.add_argument("--ft-steps",  type=int, default=10, help="Epochs for fine-tuning")
     parser.add_argument("--sample-n",  type=int, default=100000, help="Number of samples to generate")
     parser.add_argument("--no-wandb",  action="store_true", help="Disable Weights & Biases logging")
     args = parser.parse_args()
 
-    repo      = Path.cwd()  # expects to be run from the root of the TabDiff repo
+    repo      = Path.cwd()
     toml_path = repo / "tabdiff" / "configs" / "tabdiff_configs.toml"
 
-    # 0) Symlink in data/ and synthetic/ directories
-    for name, src in [("data", "/content/data"), ("synthetic", "/content/synthetic")]:
+    # 0) Symlink in data/ and synthetic/
+    for name, src in [("data","/content/data"), ("synthetic","/content/synthetic")]:
         dst = repo / name
         if dst.exists() or dst.is_symlink():
             shutil.rmtree(dst)
         os.symlink(src, dst)
 
-    # Base TOML overrides for all stages
+    # Base TOML overrides
     base = {
         "model_save_path":                "ckpt_finetune",
         "result_save_path":               "sample_results",
@@ -58,15 +58,15 @@ def main():
         "sample.batch_size":              10000,
     }
 
-    # ── 1) PRETRAIN on seed dataset ────────────────────────────────────────
-    seed_over = base.copy()
-    seed_over.update({
+    # ── 1) PRETRAIN ─────────────────────────────────────────────────────────
+    seed = base.copy()
+    seed.update({
         "train.main.steps":           args.pre_steps,
         "train.main.batch_size":      2048,
         "train.main.lr":              1e-3,
         "train.main.check_val_every": args.pre_steps + 1,
     })
-    patch_toml(toml_path, seed_over)
+    patch_toml(toml_path, seed)
 
     print(f">>> Seed pre-training ({args.pre_steps} epochs)")
     cmd = [
@@ -81,15 +81,15 @@ def main():
         cmd.append("--no_wandb")
     run_cmd(cmd, cwd=str(repo))
 
-    # ── 2) FINE-TUNE on real dataset ───────────────────────────────────────
-    ft_over = base.copy()
-    ft_over.update({
+    # ── 2) FINETUNE ─────────────────────────────────────────────────────────
+    ft = base.copy()
+    ft.update({
         "train.main.steps":           args.ft_steps,
         "train.main.batch_size":      1024,
         "train.main.lr":              5e-4,
         "train.main.check_val_every": args.ft_steps + 1,
     })
-    patch_toml(toml_path, ft_over)
+    patch_toml(toml_path, ft)
 
     print(f">>> Fine-tuning ({args.ft_steps} epochs)")
     cmd = [
@@ -105,7 +105,7 @@ def main():
         cmd.append("--no_wandb")
     run_cmd(cmd, cwd=str(repo))
 
-    # ── 3) SAMPLE & REPORT ────────────────────────────────────────────────
+    # ── 3) SAMPLE & REPORT ─────────────────────────────────────────────────
     print(f">>> Sampling & reporting ({args.sample_n} samples)")
     cmd = [
         "python3", "run_tabdiff.py",
@@ -121,7 +121,7 @@ def main():
         cmd.append("--no_wandb")
     run_cmd(cmd, cwd=str(repo))
 
-    print("✅ Pipeline complete! Check ckpt_finetune/ & sample_results/ for outputs.")
+    print("✅ Pipeline complete! Check ckpt_finetune/ & sample_results/")
 
 if __name__ == "__main__":
     main()
